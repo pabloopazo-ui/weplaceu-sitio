@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><title>QA sitio WPU</title>
+<style>body{font:14px system-ui;margin:16px}iframe{border:1px solid #ccc;display:block;margin:8px 0}pre{white-space:pre-wrap}</style></head>
+<body><h1>QA del sitio WPU</h1><p id="estado">Corriendo…</p><pre id="out"></pre><div id="marco"></div>
+<script>
+/* Abre cada página en un iframe de cada ancho y mide lo que vería un visitante:
+   desborde horizontal, letra < 12 px, toques < 40 px, imágenes que no cargan y contraste del texto (WCAG). */
+const PAGINAS = ['index.html','transporte-por-sus-propios-medios.html','distribucion-retail-b2b.html','cross-docking.html','torre-de-control.html',
+  'industrias.html','nosotros.html','blog.html','preguntas-frecuentes.html','contacto.html','privacidad.html',
+  'blog/traslado-por-sus-propios-medios.html','blog/cross-docking.html','blog/seguimiento-de-carga.html'];
+const ANCHOS = [320, 375, 768, 1200, 1366];
+function lum(c){ const m=c.match(/[\d.]+/g); if(!m) return null; const [r,g,b]=m.slice(0,3).map(v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)}); return {L:.2126*r+.7152*g+.0722*b, a:m[3]===undefined?1:+m[3]}; }
+function fondo(el){ for(let e=el;e;e=e.parentElement){ if(e.matches && e.matches('.hero,.pg-hero,.hero-movil,.mitad,.fotos figure,.cta-band')) return null;
+  const c=getComputedStyle(e).backgroundColor; const l=lum(c); if(l && l.a>.9) return l.L; } return 1; }
+function medir(doc, W){
+  const r={desborde: doc.documentElement.scrollWidth - W, letra:[], toque:[], img:[], contraste:[]};
+  const vis=el=>{const s=doc.defaultView.getComputedStyle(el),b=el.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&b.width>0&&b.height>0&&!el.closest('.rev-panel,.drawer,.rev-bar,.rev');};
+  doc.querySelectorAll('body *').forEach(el=>{
+    if(!vis(el)) return; const s=doc.defaultView.getComputedStyle(el), b=el.getBoundingClientRect();
+    const txt=[...el.childNodes].some(n=>n.nodeType===3&&n.textContent.trim());
+    if(txt && parseFloat(s.fontSize)<12) r.letra.push(el.tagName+'.'+el.className+' '+s.fontSize);
+    if((el.tagName==='A'||el.tagName==='BUTTON') && b.height<40 && !el.closest('.crumbs,p,li') ) r.toque.push((el.textContent||el.getAttribute('aria-label')||'').trim().slice(0,30)+' '+Math.round(b.width)+'x'+Math.round(b.height));
+    if(el.tagName==='IMG' && el.complete && el.naturalWidth===0) r.img.push(el.getAttribute('src'));
+    if(txt){ const fg=lum(s.color), bg=fondo(el); if(fg && bg!==null){ const ratio=(Math.max(fg.L,bg)+.05)/(Math.min(fg.L,bg)+.05);
+      const grande=parseFloat(s.fontSize)>=24||(parseFloat(s.fontSize)>=18.66&&+s.fontWeight>=700); const min=grande?3:4.5;
+      if(ratio<min) r.contraste.push(el.tagName+'.'+el.className+' «'+el.textContent.trim().slice(0,25)+'» '+ratio.toFixed(2)); } }
+  });
+  for(const k of ['letra','toque','img','contraste']) r[k]=[...new Set(r[k])].slice(0,6);
+  return r;
+}
+(async()=>{
+  const out={}; const marco=document.getElementById('marco');
+  for(const W of ANCHOS){ for(const p of PAGINAS){
+    const f=document.createElement('iframe'); f.style.width=W+'px'; f.style.height='900px'; marco.innerHTML=''; marco.appendChild(f);
+    await new Promise(res=>{ f.onload=res; f.src='sitio/'+p+'?estatico'; });
+    await new Promise(res=>setTimeout(res,350));
+    const d=f.contentDocument; await Promise.all([...d.images].map(i=>i.complete?0:new Promise(r=>{i.onload=i.onerror=r; setTimeout(r,3000);})));
+    const r=medir(d,W); const malo=r.desborde>0||r.letra.length||r.toque.length||r.img.length||r.contraste.length;
+    if(malo) out[W+' · '+p]=r;
+  }}
+  document.getElementById('estado').textContent='Listo: '+(ANCHOS.length*PAGINAS.length)+' combinaciones, '+Object.keys(out).length+' con hallazgos.';
+  document.getElementById('out').textContent=JSON.stringify(out,null,1); marco.innerHTML='';
+})();
+</script></body></html>
